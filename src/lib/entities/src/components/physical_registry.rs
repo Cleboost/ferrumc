@@ -49,6 +49,7 @@ impl PhysicalRegistry {
             &VanillaEntityType::FROG,
             &VanillaEntityType::GLOW_SQUID,
             &VanillaEntityType::HORSE,
+            &VanillaEntityType::ITEM,
             &VanillaEntityType::MOOSHROOM,
             &VanillaEntityType::MULE,
             &VanillaEntityType::OCELOT,

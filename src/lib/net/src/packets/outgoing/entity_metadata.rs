@@ -2,6 +2,7 @@
 use crate::packets::outgoing::entity_metadata::entity_state::{EntityState, EntityStateMask};
 use crate::packets::outgoing::entity_metadata::index_type::EntityMetadataIndexType;
 use crate::packets::outgoing::entity_metadata::value::EntityMetadataValue;
+use ferrumc_inventories::slot::InventorySlot;
 use ferrumc_macros::{packet, NetEncode};
 use ferrumc_net_codec::encode::{NetEncode, NetEncodeOpts};
 use ferrumc_net_codec::net_types::var_int::VarInt;
@@ -123,6 +124,14 @@ pub mod constructors {
                 EntityMetadataValue::Entity0(EntityStateMask::from_state(EntityState::Sprinting)),
             )
         }
+
+        /// Item stack metadata for dropped item entities (index 8).
+        pub fn item_stack(slot: InventorySlot) -> Self {
+            Self::new(
+                EntityMetadataIndexType::Slot,
+                EntityMetadataValue::Entity8(slot),
+            )
+        }
     }
 }
 
@@ -135,6 +144,7 @@ mod index_type {
     #[derive(Debug, Clone, Copy)]
     pub enum EntityMetadataIndexType {
         Byte, // (0) Used for bit masks and small numbers
+        Slot, // (7) Item stack payload
         Pose, // (21) Used for entity pose - protocol 772 (1.21.4)
     }
 
@@ -143,6 +153,7 @@ mod index_type {
             use EntityMetadataIndexType::*;
             let val = match self {
                 Byte => 0,
+                Slot => 7,
                 Pose => 21,
             };
 
@@ -184,6 +195,7 @@ mod value {
     pub enum EntityMetadataValue {
         Entity0(EntityStateMask),
         Entity6(EntityPose),
+        Entity8(InventorySlot),
     }
 
     impl EntityMetadataValue {
@@ -192,6 +204,7 @@ mod value {
             match self {
                 Entity0(_) => 0,
                 Entity6(_) => 6,
+                Entity8(_) => 8,
             }
         }
     }

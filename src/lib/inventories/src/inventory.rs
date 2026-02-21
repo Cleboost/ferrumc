@@ -1,3 +1,4 @@
+use crate::defined_slots;
 use crate::errors::InventoryError;
 use crate::item::ItemID;
 use crate::slot::InventorySlot;
@@ -21,6 +22,9 @@ impl Default for Inventory {
 
 impl Inventory {
     pub const DEFAULT_PLAYER_SIZE: usize = 46;
+    const PLAYER_MAIN_START: usize = 9;
+    const PLAYER_HOTBAR_END_EXCLUSIVE: usize = defined_slots::player::HOTBAR_SLOT_9 as usize + 1;
+    const DEFAULT_STACK_LIMIT: i32 = 64;
 
     pub fn new(size: usize) -> Self {
         Self {
@@ -75,6 +79,74 @@ impl Inventory {
             }
         }
         Err(InventoryError::InventoryFull)
+    }
+
+    /// Adds an item using player inventory rules:
+    /// - Never uses crafting/armor/offhand slots.
+    /// - Fills an existing compatible stack first.
+    /// - Falls back to first empty slot in main inventory/hotbar.
+    pub fn add_item_player_with_update(
+        &mut self,
+        item: InventorySlot,
+        entity: Entity,
+    ) -> Result<(), InventoryError> {
+        if item.item_id.is_none() || item.count.0 <= 0 {
+            return Ok(());
+        }
+
+        let mut remaining = item.count.0;
+
+        for index in Self::PLAYER_MAIN_START..Self::PLAYER_HOTBAR_END_EXCLUSIVE {
+            let Some(existing) = self.slots[index].as_mut() else {
+                continue;
+            };
+
+            if !slots_can_stack(existing, &item) {
+                continue;
+            }
+
+            let free_space = Self::DEFAULT_STACK_LIMIT - existing.count.0;
+            if free_space <= 0 {
+                continue;
+            }
+
+            let to_add = remaining.min(free_space);
+            existing.count.0 += to_add;
+            remaining -= to_add;
+
+            INVENTORY_UPDATES_QUEUE.push(InventoryUpdate {
+                slot_index: index as u8,
+                slot: existing.clone(),
+                entity,
+            });
+
+            if remaining <= 0 {
+                return Ok(());
+            }
+        }
+
+        while remaining > 0 {
+            let to_place = remaining.min(Self::DEFAULT_STACK_LIMIT);
+            let mut new_stack = item.clone();
+            new_stack.count.0 = to_place;
+
+            let Some(index) = (Self::PLAYER_MAIN_START..Self::PLAYER_HOTBAR_END_EXCLUSIVE)
+                .find(|i| self.slots[*i].is_none())
+            else {
+                return Err(InventoryError::InventoryFull);
+            };
+
+            self.slots[index] = Some(new_stack.clone());
+            INVENTORY_UPDATES_QUEUE.push(InventoryUpdate {
+                slot_index: index as u8,
+                slot: new_stack,
+                entity,
+            });
+
+            remaining -= to_place;
+        }
+
+        Ok(())
     }
 
     pub fn set_item(&mut self, index: usize, item: InventorySlot) -> Result<(), InventoryError> {
@@ -218,6 +290,14 @@ impl Inventory {
 
         Ok(())
     }
+}
+
+fn slots_can_stack(existing: &InventorySlot, incoming: &InventorySlot) -> bool {
+    existing.item_id == incoming.item_id
+        && existing.components_to_add_count == incoming.components_to_add_count
+        && existing.components_to_remove_count == incoming.components_to_remove_count
+        && existing.components_to_add == incoming.components_to_add
+        && existing.components_to_remove == incoming.components_to_remove
 }
 
 #[cfg(test)]

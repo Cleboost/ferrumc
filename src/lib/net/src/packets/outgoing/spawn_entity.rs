@@ -5,6 +5,7 @@ use ferrumc_core::identity::entity_identity::EntityIdentity;
 use ferrumc_core::identity::player_identity::PlayerIdentity;
 use ferrumc_core::transform::position::Position;
 use ferrumc_core::transform::rotation::Rotation;
+use ferrumc_core::transform::velocity::Velocity;
 use ferrumc_macros::{get_registry_entry, packet, NetEncode};
 use ferrumc_net_codec::net_types::angle::NetAngle;
 use ferrumc_net_codec::net_types::var_int::VarInt;
@@ -30,6 +31,12 @@ pub struct SpawnEntityPacket {
 const PLAYER_ID: u64 = get_registry_entry!("minecraft:entity_type.entries.minecraft:player");
 
 impl SpawnEntityPacket {
+    fn velocity_to_protocol(value: f32) -> i16 {
+        (value * 8000.0)
+            .clamp(i16::MIN as f32, i16::MAX as f32)
+            .round() as i16
+    }
+
     /// Creates a spawn entity packet from direct component values.
     ///
     /// This is useful when you have the component values directly
@@ -59,6 +66,23 @@ impl SpawnEntityPacket {
             velocity_y: 0,
             velocity_z: 0,
         }
+    }
+
+    pub fn new_with_velocity(
+        entity_id: i32,
+        entity_uuid: u128,
+        entity_type_id: i32,
+        position: &Position,
+        rotation: &Rotation,
+        velocity: &Velocity,
+    ) -> Self {
+        let mut packet = Self::new(entity_id, entity_uuid, entity_type_id, position, rotation);
+
+        packet.velocity_x = Self::velocity_to_protocol(velocity.x);
+        packet.velocity_y = Self::velocity_to_protocol(velocity.y);
+        packet.velocity_z = Self::velocity_to_protocol(velocity.z);
+
+        packet
     }
 
     pub fn player(

@@ -1,4 +1,5 @@
 use bevy_ecs::prelude::{Entity, Query, Res};
+use ferrumc_components::player::abilities::PlayerAbilities;
 use ferrumc_core::collisions::bounds::CollisionBounds;
 use ferrumc_core::transform::position::Position;
 use ferrumc_net::connection::StreamWriter;
@@ -40,11 +41,19 @@ static ITEM_TO_BLOCK_MAPPING: Lazy<HashMap<i32, BlockStateId>> = Lazy::new(|| {
 pub fn handle(
     receiver: Res<PlaceBlockReceiver>,
     state: Res<GlobalStateResource>,
-    query: Query<(Entity, &StreamWriter, &Inventory, &Hotbar, &Position)>,
+    mut query: Query<(
+        Entity,
+        &StreamWriter,
+        &mut Inventory,
+        &Hotbar,
+        &Position,
+        &PlayerAbilities,
+    )>,
+    broadcast_query: Query<(&StreamWriter, &Position)>,
     pos_q: Query<(&Position, &CollisionBounds)>,
 ) {
     'ev_loop: for (event, eid) in receiver.0.try_iter() {
-        let Ok((entity, conn, inventory, hotbar, _)) = query.get(eid) else {
+        let Ok((entity, conn, mut inventory, hotbar, _, abilities)) = query.get_mut(eid) else {
             debug!("Could not get connection for entity {:?}", eid);
             continue;
         };
@@ -54,11 +63,17 @@ pub fn handle(
         }
         match event.hand.0 {
             0 => {
-                let Ok(slot) = hotbar.get_selected_item(inventory) else {
+                let Ok(slot) = hotbar.get_selected_item(&inventory) else {
                     error!("Could not fetch {:?}", eid);
                     continue 'ev_loop;
                 };
                 if let Some(selected_item) = slot {
+                    if selected_item.count.0 <= 0 {
+                        trace!("Cannot place block with empty selected slot");
+                        continue 'ev_loop;
+                    }
+
+                    let selected_item = selected_item.clone();
                     let Some(item_id) = selected_item.item_id else {
                         error!("Selected item has no item ID");
                         continue 'ev_loop;
@@ -166,10 +181,37 @@ pub fn handle(
                         continue 'ev_loop;
                     }
 
+                    if !abilities.creative_mode {
+                        let selected_index = hotbar.get_selected_inventory_index();
+
+                        if selected_item.count.0 <= 1 {
+                            if let Err(err) =
+                                inventory.clear_slot_with_update(selected_index, entity)
+                            {
+                                error!(
+                                    "Failed to clear selected inventory slot after placement: {:?}",
+                                    err
+                                );
+                            }
+                        } else {
+                            let mut remaining = selected_item.clone();
+                            remaining.count.0 -= 1;
+
+                            if let Err(err) =
+                                inventory.set_item_with_update(selected_index, remaining, entity)
+                            {
+                                error!(
+                                    "Failed to decrement selected inventory slot after placement: {:?}",
+                                    err
+                                );
+                            }
+                        }
+                    }
+
                     let offset_chunk = offset_pos.chunk();
                     let (offset_chunk_x, offset_chunk_z) = (offset_chunk.x(), offset_chunk.z());
                     let render_distance = get_global_config().chunk_render_distance as i32;
-                    for (_, conn, _, _, pos) in query.iter() {
+                    for (conn, pos) in broadcast_query.iter() {
                         let chunk = pos.chunk();
                         let (chunk_x, chunk_z) = (chunk.x, chunk.y);
 

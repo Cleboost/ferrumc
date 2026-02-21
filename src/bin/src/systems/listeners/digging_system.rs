@@ -1,7 +1,12 @@
 use bevy_ecs::prelude::*;
+use ferrumc_core::transform::position::Position;
+use ferrumc_core::transform::velocity::Velocity;
+use ferrumc_inventories::item::ItemID;
+use ferrumc_inventories::slot::InventorySlot;
 use ferrumc_world::pos::BlockPos;
 use std::time::{Duration, Instant};
 
+use crate::systems::item_entities::spawn_dropped_item;
 use crate::BinaryError;
 use ferrumc_components::player::abilities::PlayerAbilities;
 use ferrumc_components::player::gameplay_state::digging::PlayerDigging;
@@ -247,6 +252,7 @@ pub fn handle_finish_digging(
             // We wrap the block-breaking logic in its own function
             // to handle the errors cleanly (replaces `try` block).
             if let Err(e) = break_block(
+                &mut commands,
                 &state,
                 &broadcast_query,
                 &event.position,
@@ -272,6 +278,7 @@ pub fn handle_finish_digging(
 
 /// Helper function to contain the block-breaking logic (replaces `try` block)
 fn break_block(
+    commands: &mut Commands,
     state: &Res<GlobalStateResource>,
     broadcast_query: &Query<(Entity, &StreamWriter)>,
     position: &ferrumc_net_codec::net_types::network_position::NetworkPosition,
@@ -280,7 +287,25 @@ fn break_block(
     let pos: BlockPos = position.clone().into();
     let mut chunk = ferrumc_utils::world::load_or_generate_mut(&state.0, pos.chunk(), "overworld")
         .expect("Failed to load or generate chunk");
+
+    let previous_block_state = chunk.get_block(pos.chunk_block_pos());
     chunk.set_block(pos.chunk_block_pos(), BlockStateId::default());
+
+    if let Some(item_id) = ItemID::from_block_state(previous_block_state) {
+        let slot = InventorySlot {
+            count: VarInt::new(1),
+            item_id: Some(item_id),
+            ..Default::default()
+        };
+
+        let drop_position = Position::new(
+            pos.pos.x as f64 + 0.5,
+            pos.pos.y as f64 + 0.5,
+            pos.pos.z as f64 + 0.5,
+        );
+
+        spawn_dropped_item(commands, drop_position, Velocity::new(0.0, 0.12, 0.0), slot);
+    }
 
     // Send block broken event for un-grounding system
     debug!("Sending BlockBrokenEvent for block at {:?}", pos.pos);
